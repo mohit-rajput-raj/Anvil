@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   TrendingUp,
   Zap,
+  Calendar,
 } from "lucide-react";
 
 // Cyber Anvil Vector Icon
@@ -77,6 +78,34 @@ function formatRemainingTime(ms: number) {
   return `${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
 }
 
+function toDatetimeLocalString(timestamp: number | null): string {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function fromDatetimeLocalString(str: string): number | null {
+  if (!str) return null;
+  const time = new Date(str).getTime();
+  return isNaN(time) ? null : time;
+}
+
+function formatUnlockDateTime(timestamp: number | null): string {
+  if (!timestamp) return "Instant";
+  const date = new Date(timestamp);
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function AnvilApp() {
   const [mounted, setMounted] = useState(false);
   const [ingots, setIngots] = useState<IngotItem[]>([]);
@@ -98,6 +127,8 @@ export default function AnvilApp() {
   const [newEmail, setNewEmail] = useState("");
   const [newTag, setNewTag] = useState("");
   const [newNotes, setNewNotes] = useState("");
+  const [newStatus, setNewStatus] = useState<"ready" | "cooldown">("ready");
+  const [newCooldownDays, setNewCooldownDays] = useState<number>(7);
 
   const [editingIngot, setEditingIngot] = useState<IngotItem | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -234,12 +265,17 @@ export default function AnvilApp() {
     e.preventDefault();
     if (!newEmail.trim()) return;
 
+    const isCool = newStatus === "cooldown";
+    const cooldownTime = isCool
+      ? Date.now() + Math.max(1, newCooldownDays) * 24 * 60 * 60 * 1000
+      : null;
+
     const newEntry: IngotItem = {
       id: Date.now().toString(),
       email: newEmail.trim(),
       tag: newTag.trim() || "General",
-      status: "ready",
-      cooldownUntil: null,
+      status: isCool ? "cooldown" : "ready",
+      cooldownUntil: cooldownTime,
       notes: newNotes.trim(),
       strikesCompleted: 0,
     };
@@ -248,8 +284,38 @@ export default function AnvilApp() {
     setNewEmail("");
     setNewTag("");
     setNewNotes("");
+    setNewStatus("ready");
     setIsAddModalOpen(false);
-    showToast("New ingot cast and forged into rotation queue!");
+    showToast(
+      isCool
+        ? `Ingot cast and quenched for ${newCooldownDays}d!`
+        : "New ingot cast and forged into rotation queue!",
+    );
+  };
+
+  const handleAdjustCooldown = (id: string, deltaHours: number) => {
+    setIngots((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const currentTarget = item.cooldownUntil || Date.now();
+        const newTime = currentTarget + deltaHours * 3600 * 1000;
+        if (newTime <= Date.now()) {
+          return {
+            ...item,
+            status: "ready" as const,
+            cooldownUntil: null,
+          };
+        }
+        return {
+          ...item,
+          status: "cooldown" as const,
+          cooldownUntil: newTime,
+        };
+      }),
+    );
+    showToast(
+      `Cooldown ${deltaHours > 0 ? "extended" : "reduced"} by ${Math.abs(deltaHours)}h.`,
+    );
   };
 
   const handleDelete = (id: string) => {
@@ -285,11 +351,21 @@ export default function AnvilApp() {
     e.preventDefault();
     if (!editingIngot) return;
 
+    let finalItem = { ...editingIngot };
+    if (finalItem.status === "cooldown") {
+      if (!finalItem.cooldownUntil || finalItem.cooldownUntil <= Date.now()) {
+        finalItem.status = "ready";
+        finalItem.cooldownUntil = null;
+      }
+    } else {
+      finalItem.cooldownUntil = null;
+    }
+
     setIngots((prev) =>
-      prev.map((item) => (item.id === editingIngot.id ? editingIngot : item)),
+      prev.map((item) => (item.id === finalItem.id ? finalItem : item)),
     );
     setEditingIngot(null);
-    showToast("Ingot specifications updated.");
+    showToast("Ingot specifications & cooldown timer updated.");
   };
 
   const handleExportData = () => {
@@ -421,26 +497,26 @@ export default function AnvilApp() {
         </div>
       )}
 
-      {/* ANVIL FORGE HEADER */}
-      <header className="sticky top-0 z-40 border-b border-[#0f3456]/90 bg-[#05080f]/90 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 sm:h-18 flex items-center justify-between gap-2 sm:gap-4">
+      {/* ANVIL FORGE HEADER - FIXED */}
+      <header className="fixed top-0 left-0 right-0 z-40 border-b border-[#0f3456]/90 bg-[#05080f]/95 backdrop-blur-xl shadow-[0_4px_30px_rgba(0,0,0,0.6)]">
+        <div className="max-w-6xl mx-auto px-2.5 sm:px-6 h-13 sm:h-18 flex items-center justify-between gap-1.5 sm:gap-4">
           {/* Logo & Identity */}
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             <div className="relative group cursor-pointer shrink-0">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-[#00e5ff] via-[#0369a1] to-[#00e5ff] rounded-lg sm:rounded-xl blur-xs opacity-75 group-hover:opacity-100 transition duration-500 animate-aura-pulse" />
-              <div className="relative w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-[#071322] border border-[#00e5ff]/60 flex items-center justify-center text-[#00e5ff] shadow-[0_0_15px_rgba(0,229,255,0.25)]">
-                <AnvilIcon className="w-4.5 h-4.5 sm:w-5.5 sm:h-5.5 stroke-[2.2]" />
+              <div className="relative w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-[#071322] border border-[#00e5ff]/60 flex items-center justify-center text-[#00e5ff] shadow-[0_0_15px_rgba(0,229,255,0.25)]">
+                <AnvilIcon className="w-4 h-4 sm:w-5.5 sm:h-5.5 stroke-[2.2]" />
               </div>
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1 sm:gap-2">
-                <span className="text-xs sm:text-base font-black tracking-wider uppercase text-white drop-shadow-[0_0_12px_rgba(0,229,255,0.4)] font-mono">
+                <span className="text-[11px] sm:text-base font-black tracking-wider uppercase text-white drop-shadow-[0_0_12px_rgba(0,229,255,0.4)] font-mono shrink-0">
                   ANVIL
                 </span>
-                <span className="text-[10px] sm:text-xs font-mono text-slate-500">//</span>
+                <span className="text-[9px] sm:text-xs font-mono text-slate-500 shrink-0">//</span>
                 <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded text-[8px] sm:text-[10px] font-bold bg-[#00e5ff]/15 text-[#00e5ff] border border-[#00e5ff]/40 tracking-wider uppercase font-mono shrink-0">
                   <span className="w-1 h-1 rounded-full bg-[#00e5ff] animate-pulse" />
-                  <span className="hidden xs:inline">FORGE </span>CORE
+                  <span>CORE</span>
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-mono tracking-tight truncate hidden sm:block">
@@ -478,18 +554,18 @@ export default function AnvilApp() {
 
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="inline-flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium text-slate-300 bg-[#091b2e] hover:bg-[#0c2742] hover:text-white border border-[#0f3456] transition-all cursor-pointer shrink-0"
-              title="Calibration Settings"
+              className="inline-flex items-center gap-1 px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-medium text-slate-300 bg-[#091b2e] hover:bg-[#0c2742] hover:text-white border border-[#0f3456] transition-all cursor-pointer shrink-0 font-mono"
+              title="Thermal Quench Calibration Settings"
             >
               <Settings className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#00e5ff]" />
-              <span className="text-[#00e5ff] font-mono font-semibold">{quenchDays}d</span>
+              <span className="text-[#00e5ff] font-semibold">{quenchDays}d</span>
             </button>
 
             <button
               onClick={() => setIsAddModalOpen(true)}
-              className="relative group overflow-hidden inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-4 py-1.5 rounded-lg text-[11px] sm:text-xs font-extrabold text-slate-950 bg-gradient-to-r from-white via-cyan-100 to-[#00e5ff] hover:brightness-110 shadow-[0_0_15px_rgba(0,229,255,0.35)] transition-all cursor-pointer shrink-0 font-mono"
+              className="relative group overflow-hidden inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-4 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold text-slate-950 bg-gradient-to-r from-white via-cyan-100 to-[#00e5ff] hover:brightness-110 shadow-[0_0_15px_rgba(0,229,255,0.35)] transition-all cursor-pointer shrink-0 font-mono"
             >
-              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <Plus className="w-3 h-3 sm:w-3.5 sm:h-3.5 stroke-[2.5]" />
               <span>Cast<span className="hidden sm:inline"> Ingot</span></span>
             </button>
           </div>
@@ -497,7 +573,7 @@ export default function AnvilApp() {
       </header>
 
       {/* MAIN FORGE CONTENT */}
-      <main className="max-w-6xl mx-auto px-3.5 sm:px-6 pt-5 sm:pt-8 pb-20 relative z-10 space-y-6 sm:space-y-7">
+      <main className="max-w-6xl mx-auto px-3.5 sm:px-6 pt-16 sm:pt-24 pb-28 relative z-10 space-y-6 sm:space-y-7">
         {/* THE ANVIL: Primary Strike Crucible */}
         <section className="relative rounded-2xl overflow-hidden border border-[#0f3456]/90 bg-gradient-to-b from-[#091b2e]/95 via-[#071322]/90 to-[#050b14]/95 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.65)]">
           {/* Top Molten Cyan Laser Beam */}
@@ -994,15 +1070,36 @@ export default function AnvilApp() {
                           <span>Ready</span>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-500/10 text-sky-400 border border-sky-500/30 font-mono">
-                            <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
+                          <div className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold bg-sky-500/10 text-sky-400 border border-sky-500/30 font-mono">
+                            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
                             <span>Quench</span>
                           </div>
-                          <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-slate-500" />
-                            {formatRemainingTime(remainingMs)}
-                          </span>
+                          <button
+                            onClick={() => setEditingIngot(item)}
+                            className="text-[11px] font-mono text-slate-300 hover:text-[#00e5ff] flex items-center gap-1 bg-[#050b14] hover:bg-[#0c2742] px-2 py-0.5 rounded border border-[#0f3456] transition-colors cursor-pointer"
+                            title="Click to edit quench time"
+                          >
+                            <Clock className="w-3 h-3 text-[#00e5ff]" />
+                            <span>{formatRemainingTime(remainingMs)}</span>
+                            <Edit3 className="w-2.5 h-2.5 text-slate-500 ml-0.5" />
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleAdjustCooldown(item.id, 24)}
+                              className="px-1.5 py-0.5 text-[10px] font-mono text-slate-400 hover:text-white bg-[#050b14] border border-[#0f3456] rounded hover:border-[#00e5ff]/50 transition-all cursor-pointer"
+                              title="Add 1 day (+24h)"
+                            >
+                              +1d
+                            </button>
+                            <button
+                              onClick={() => handleAdjustCooldown(item.id, -24)}
+                              className="px-1.5 py-0.5 text-[10px] font-mono text-slate-400 hover:text-white bg-[#050b14] border border-[#0f3456] rounded hover:border-[#00e5ff]/50 transition-all cursor-pointer"
+                              title="Reduce 1 day (-24h)"
+                            >
+                              -1d
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -1134,9 +1231,38 @@ export default function AnvilApp() {
                     </div>
 
                     <div className="pt-3 border-t border-[#0f3456] flex items-center justify-between gap-2">
-                      {!isReady && (
-                        <span className="text-[11px] font-mono text-slate-400 font-semibold">
-                          {formatRemainingTime(remainingMs)}
+                      {!isReady ? (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            onClick={() => setEditingIngot(item)}
+                            className="text-[11px] font-mono text-slate-300 hover:text-[#00e5ff] flex items-center gap-1 bg-[#050b14] hover:bg-[#0c2742] px-2 py-0.5 rounded border border-[#0f3456] transition-colors cursor-pointer"
+                            title="Click to edit quench time"
+                          >
+                            <Clock className="w-3 h-3 text-[#00e5ff]" />
+                            <span>{formatRemainingTime(remainingMs)}</span>
+                            <Edit3 className="w-2.5 h-2.5 text-slate-500 ml-0.5" />
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleAdjustCooldown(item.id, 24)}
+                              className="px-1.5 py-0.5 text-[10px] font-mono text-slate-400 hover:text-white bg-[#050b14] border border-[#0f3456] rounded hover:border-[#00e5ff]/50 transition-all cursor-pointer"
+                              title="Add 1 day (+24h)"
+                            >
+                              +1d
+                            </button>
+                            <button
+                              onClick={() => handleAdjustCooldown(item.id, -24)}
+                              className="px-1.5 py-0.5 text-[10px] font-mono text-slate-400 hover:text-white bg-[#050b14] border border-[#0f3456] rounded hover:border-[#00e5ff]/50 transition-all cursor-pointer"
+                              title="Reduce 1 day (-24h)"
+                            >
+                              -1d
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
+                          Primed
                         </span>
                       )}
                       <div className="flex items-center gap-1.5 ml-auto">
@@ -1177,11 +1303,24 @@ export default function AnvilApp() {
         </section>
       </main>
 
+      {/* FLOATING ACTION BUTTON (FAB) - Fixed Bottom-Right Add Ingot */}
+      <aside aria-label="Quick actions" className="fixed bottom-5 right-5 sm:bottom-7 sm:right-7 z-40">
+        <button
+          onClick={() => setIsAddModalOpen(true)}
+          aria-label="Cast New Ingot / Add Email"
+          className="relative group flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-[#0369a1] via-[#0284c7] to-[#00e5ff] text-slate-950 shadow-[0_0_25px_rgba(0,229,255,0.45)] border border-[#00e5ff]/70 hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer"
+          title="Cast New Ingot / Add Email"
+        >
+          <div className="absolute -inset-1 rounded-2xl bg-[#00e5ff] blur-md opacity-35 group-hover:opacity-75 transition duration-300 pointer-events-none" />
+          <Plus className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.8] text-slate-950 relative z-10 transition-transform duration-300 group-hover:rotate-90" />
+        </button>
+      </aside>
+
       {/* MODAL: CAST NEW INGOT */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-[#05080f]/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#071322] border border-[#00e5ff]/45 rounded-2xl max-w-md w-full p-6 shadow-[0_0_50px_rgba(0,229,255,0.25)] relative animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between mb-5">
+        <div className="fixed inset-0 z-50 bg-[#05080f]/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-[#071322] border border-[#00e5ff]/45 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-[0_0_50px_rgba(0,229,255,0.25)] relative max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-[#00e5ff]/15 border border-[#00e5ff]/40 flex items-center justify-center text-[#00e5ff]">
                   <AnvilIcon className="w-5 h-5 stroke-[2.2]" />
@@ -1203,7 +1342,7 @@ export default function AnvilApp() {
               </button>
             </div>
 
-            <form onSubmit={handleAddIngot} className="space-y-4">
+            <form onSubmit={handleAddIngot} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 font-mono">
                   Account Email Address *
@@ -1231,6 +1370,55 @@ export default function AnvilApp() {
                 />
               </div>
 
+              {/* Status on Creation */}
+              <div className="rounded-xl p-3 bg-[#050b14] border border-[#0f3456] space-y-2.5">
+                <label className="block text-[11px] font-bold text-slate-300 font-mono">
+                  Initial State
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewStatus("ready")}
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      newStatus === "ready"
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_10px_rgba(52,211,153,0.2)]"
+                        : "bg-[#071322] text-slate-400 border-[#0f3456]"
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${newStatus === "ready" ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-slate-600"}`} />
+                    Ready (Primed)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewStatus("cooldown")}
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      newStatus === "cooldown"
+                        ? "bg-sky-500/20 text-sky-400 border-sky-500/50 shadow-[0_0_10px_rgba(56,189,248,0.2)]"
+                        : "bg-[#071322] text-slate-400 border-[#0f3456]"
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${newStatus === "cooldown" ? "bg-sky-400 animate-pulse" : "bg-slate-600"}`} />
+                    Start In Quench
+                  </button>
+                </div>
+                {newStatus === "cooldown" && (
+                  <div className="pt-1.5 flex items-center justify-between gap-2 text-xs font-mono">
+                    <span className="text-slate-400 text-[11px]">Quench Duration:</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={newCooldownDays}
+                        onChange={(e) => setNewCooldownDays(Math.max(1, Number(e.target.value)))}
+                        className="w-16 bg-[#071322] border border-[#0f3456] rounded-md px-2 py-1 text-xs text-white text-center font-mono focus:outline-none focus:border-[#00e5ff]"
+                      />
+                      <span className="text-slate-400 text-xs">Days</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 font-mono">
                   Ingot Notes (Optional)
@@ -1239,7 +1427,7 @@ export default function AnvilApp() {
                   placeholder="Tier specifications, rate limits, or context..."
                   value={newNotes}
                   onChange={(e) => setNewNotes(e.target.value)}
-                  rows={3}
+                  rows={2}
                   className="w-full bg-[#050b14] border border-[#0f3456] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00e5ff] focus:ring-1 focus:ring-[#00e5ff] resize-none font-mono"
                 />
               </div>
@@ -1264,21 +1452,21 @@ export default function AnvilApp() {
         </div>
       )}
 
-      {/* MODAL: EDIT INGOT */}
+      {/* MODAL: EDIT INGOT WITH COOLDOWN TIME EDITING */}
       {editingIngot && (
-        <div className="fixed inset-0 z-50 bg-[#05080f]/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#071322] border border-[#00e5ff]/45 rounded-2xl max-w-md w-full p-6 shadow-[0_0_50px_rgba(0,229,255,0.25)] relative animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between mb-5">
+        <div className="fixed inset-0 z-50 bg-[#05080f]/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-[#071322] border border-[#00e5ff]/45 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-[0_0_50px_rgba(0,229,255,0.25)] relative max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-[#00e5ff]/15 border border-[#00e5ff]/40 flex items-center justify-center text-[#00e5ff]">
                   <Edit3 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-white font-mono uppercase">
-                    Modify Ingot Specifications
+                  <h3 className="text-sm sm:text-base font-black text-white font-mono uppercase">
+                    Modify Ingot & Cooldown
                   </h3>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    Update conduit credentials
+                    Update conduit credentials & quench timers
                   </p>
                 </div>
               </div>
@@ -1290,10 +1478,10 @@ export default function AnvilApp() {
               </button>
             </div>
 
-            <form onSubmit={handleUpdateIngot} className="space-y-4">
+            <form onSubmit={handleUpdateIngot} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 font-mono">
-                  Email Address
+                  Email Address *
                 </label>
                 <input
                   type="email"
@@ -1320,6 +1508,213 @@ export default function AnvilApp() {
                 />
               </div>
 
+              {/* COOLDOWN TIME & STATUS EDITING SECTION */}
+              <div className="rounded-xl p-3.5 bg-[#050b14] border border-[#0f3456] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 font-mono flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-[#00e5ff]" />
+                    Thermal Quench & Cooldown Time
+                  </span>
+                  <span className="text-[10px] font-mono uppercase font-bold text-[#00e5ff] bg-[#00e5ff]/10 px-2 py-0.5 rounded border border-[#00e5ff]/30">
+                    Editable Time
+                  </span>
+                </div>
+
+                {/* Status Toggle Buttons */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingIngot({
+                        ...editingIngot,
+                        status: "ready",
+                        cooldownUntil: null,
+                      })
+                    }
+                    className={`py-2 px-3 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      editingIngot.status === "ready"
+                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_12px_rgba(52,211,153,0.25)]"
+                        : "bg-[#071322] text-slate-400 border-[#0f3456] hover:text-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        editingIngot.status === "ready"
+                          ? "bg-emerald-400 shadow-[0_0_6px_#34d399]"
+                          : "bg-slate-600"
+                      }`}
+                    />
+                    Ready (Primed)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const quenchTarget =
+                        editingIngot.cooldownUntil &&
+                        editingIngot.cooldownUntil > Date.now()
+                          ? editingIngot.cooldownUntil
+                          : Date.now() + quenchDays * 24 * 60 * 60 * 1000;
+                      setEditingIngot({
+                        ...editingIngot,
+                        status: "cooldown",
+                        cooldownUntil: quenchTarget,
+                      });
+                    }}
+                    className={`py-2 px-3 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      editingIngot.status === "cooldown"
+                        ? "bg-sky-500/20 text-sky-400 border-sky-500/50 shadow-[0_0_12px_rgba(56,189,248,0.25)]"
+                        : "bg-[#071322] text-slate-400 border-[#0f3456] hover:text-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        editingIngot.status === "cooldown"
+                          ? "bg-sky-400 animate-pulse"
+                          : "bg-slate-600"
+                      }`}
+                    />
+                    In Thermal Quench
+                  </button>
+                </div>
+
+                {/* Quench Time Controls (when cooldown is active) */}
+                {editingIngot.status === "cooldown" && (
+                  <div className="pt-2 space-y-3 border-t border-[#0f3456]/60 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between text-[11px] font-mono">
+                      <span className="text-slate-400">Unlock Date & Time:</span>
+                      <span className="text-[#00e5ff] font-bold">
+                        {formatUnlockDateTime(editingIngot.cooldownUntil)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] font-mono">
+                      <span className="text-slate-400">Remaining Cooldown:</span>
+                      <span className="text-sky-300 font-bold">
+                        {formatRemainingTime(
+                          (editingIngot.cooldownUntil || Date.now()) - Date.now(),
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Datetime Local Picker */}
+                    <div>
+                      <label className="block text-[11px] font-mono text-slate-400 mb-1">
+                        Exact Quench End Date & Time:
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={toDatetimeLocalString(
+                          editingIngot.cooldownUntil ||
+                            Date.now() + quenchDays * 86400000,
+                        )}
+                        onChange={(e) => {
+                          const ts = fromDatetimeLocalString(e.target.value);
+                          if (ts) {
+                            setEditingIngot({
+                              ...editingIngot,
+                              cooldownUntil: ts,
+                            });
+                          }
+                        }}
+                        className="w-full bg-[#071322] border border-[#0f3456] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00e5ff] font-mono"
+                      />
+                    </div>
+
+                    {/* Quick Adjustment Chips */}
+                    <div>
+                      <label className="block text-[11px] font-mono text-slate-400 mb-1.5">
+                        Quick Adjustments:
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = editingIngot.cooldownUntil || Date.now();
+                            setEditingIngot({
+                              ...editingIngot,
+                              cooldownUntil: cur + 1 * 3600 * 1000,
+                            });
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-semibold bg-[#071728] hover:bg-[#0c2742] text-slate-300 hover:text-white border border-[#0f3456] rounded-md transition-all cursor-pointer"
+                        >
+                          +1h
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = editingIngot.cooldownUntil || Date.now();
+                            setEditingIngot({
+                              ...editingIngot,
+                              cooldownUntil: cur + 6 * 3600 * 1000,
+                            });
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-semibold bg-[#071728] hover:bg-[#0c2742] text-slate-300 hover:text-white border border-[#0f3456] rounded-md transition-all cursor-pointer"
+                        >
+                          +6h
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = editingIngot.cooldownUntil || Date.now();
+                            setEditingIngot({
+                              ...editingIngot,
+                              cooldownUntil: cur + 24 * 3600 * 1000,
+                            });
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-semibold bg-[#071728] hover:bg-[#0c2742] text-slate-300 hover:text-white border border-[#0f3456] rounded-md transition-all cursor-pointer"
+                        >
+                          +1d
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = editingIngot.cooldownUntil || Date.now();
+                            setEditingIngot({
+                              ...editingIngot,
+                              cooldownUntil: cur + 3 * 24 * 3600 * 1000,
+                            });
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-semibold bg-[#071728] hover:bg-[#0c2742] text-slate-300 hover:text-white border border-[#0f3456] rounded-md transition-all cursor-pointer"
+                        >
+                          +3d
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur = editingIngot.cooldownUntil || Date.now();
+                            const newTime = Math.max(
+                              Date.now(),
+                              cur - 24 * 3600 * 1000,
+                            );
+                            setEditingIngot({
+                              ...editingIngot,
+                              cooldownUntil: newTime,
+                            });
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-semibold bg-[#071728] hover:bg-[#0c2742] text-slate-300 hover:text-white border border-[#0f3456] rounded-md transition-all cursor-pointer"
+                        >
+                          -1d
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingIngot({
+                              ...editingIngot,
+                              cooldownUntil:
+                                Date.now() + quenchDays * 24 * 60 * 60 * 1000,
+                            });
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-semibold bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20 text-[#00e5ff] border border-[#00e5ff]/40 rounded-md transition-all cursor-pointer"
+                        >
+                          Reset to {quenchDays}d
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 font-mono">
                   Notes
@@ -1329,12 +1724,12 @@ export default function AnvilApp() {
                   onChange={(e) =>
                     setEditingIngot({ ...editingIngot, notes: e.target.value })
                   }
-                  rows={3}
+                  rows={2}
                   className="w-full bg-[#050b14] border border-[#0f3456] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#00e5ff] focus:ring-1 focus:ring-[#00e5ff] resize-none font-mono"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3">
+              <div className="flex items-center justify-end gap-2.5 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingIngot(null)}
@@ -1383,9 +1778,22 @@ export default function AnvilApp() {
             <div className="space-y-4">
               <div>
                 <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-2 font-mono">
-                  <span>Thermal Quench Period</span>
-                  <span className="text-[#00e5ff]">{quenchDays} Days</span>
+                  <span>Default Thermal Quench Period</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={quenchDays}
+                      onChange={(e) =>
+                        setQuenchDays(Math.max(1, Math.min(60, Number(e.target.value))))
+                      }
+                      className="w-14 bg-[#050b14] border border-[#0f3456] rounded-md px-2 py-0.5 text-xs text-[#00e5ff] font-mono text-center font-bold focus:outline-none focus:border-[#00e5ff]"
+                    />
+                    <span className="text-[#00e5ff]">Days</span>
+                  </div>
                 </div>
+
                 <input
                   type="range"
                   min="1"
@@ -1394,15 +1802,29 @@ export default function AnvilApp() {
                   onChange={(e) => setQuenchDays(Number(e.target.value))}
                   className="w-full accent-[#00e5ff] cursor-pointer"
                 />
-                <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1 font-bold">
-                  <span>1 day</span>
-                  <span>14 days</span>
-                  <span>30 days</span>
+
+                {/* Preset Chips */}
+                <div className="flex items-center justify-between gap-1.5 mt-2.5">
+                  {[1, 3, 7, 14, 30].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setQuenchDays(d)}
+                      className={`flex-1 py-1 text-[10px] font-mono font-bold rounded-lg border transition-all cursor-pointer ${
+                        quenchDays === d
+                          ? "bg-[#00e5ff]/20 text-[#00e5ff] border-[#00e5ff]/60 shadow-[0_0_10px_rgba(0,229,255,0.25)]"
+                          : "bg-[#050b14] text-slate-400 border-[#0f3456] hover:text-slate-200"
+                      }`}
+                    >
+                      {d}d
+                    </button>
+                  ))}
                 </div>
+
                 <p className="text-[11px] text-slate-400 mt-3 font-mono leading-relaxed">
-                  When an ingot is struck and exhausted, it enters the thermal
-                  quench chamber for this duration before automatically
-                  returning to the ready state.
+                  When an ingot is struck on the Anvil, it enters thermal quench
+                  for this default duration before automatically recharging to
+                  100% Ready. Individual ingot times can also be customized.
                 </p>
               </div>
 
